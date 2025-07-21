@@ -6,21 +6,21 @@ export function initGame() {
     height: window.innerHeight,
     backgroundColor: 0x202020,
   });
-
   document.body.appendChild(app.view);
 
-  // ====== LABEL SETUP ======
+  // ===== UI ELEMENTS =====
+  const container = new PIXI.Container();
+  app.stage.addChild(container);
+
   const label = new PIXI.Text("1.00x", {
     fontFamily: "Arial",
     fontSize: 64,
     fill: 0xffffff,
   });
   label.anchor.set(0.5);
-  label.x = app.screen.width / 2;
-  label.y = app.screen.height / 2 - 50;
-  app.stage.addChild(label);
+  label.position.set(app.screen.width / 2, app.screen.height / 2 - 40);
+  container.addChild(label);
 
-  // ====== BUTTON SETUP ======
   const button = new PIXI.Text("Start", {
     fontFamily: "Arial",
     fontSize: 36,
@@ -29,74 +29,115 @@ export function initGame() {
   button.anchor.set(0.5);
   button.interactive = true;
   button.buttonMode = true;
-  button.x = app.screen.width / 2;
-  button.y = app.screen.height / 2 + 80;
-  app.stage.addChild(button);
+  button.position.set(app.screen.width / 2, app.screen.height / 2 + 100);
+  container.addChild(button);
 
-  // ====== GAME STATE ======
+  const countdownText = new PIXI.Text("", {
+    fontFamily: "Arial",
+    fontSize: 48,
+    fill: 0xffcc00,
+  });
+  countdownText.anchor.set(0.5);
+  countdownText.position.set(app.screen.width / 2, app.screen.height / 2);
+  container.addChild(countdownText);
+
+  // ===== GAME STATE =====
+  let gameState: "IDLE" | "COUNTDOWN" | "RUNNING" | "BOOMED" | "CASHED_OUT" =
+    "IDLE";
   let multiplier = 1.0;
-  let running = false;
-  let cashedOut = false;
+  const rate = 0.01;
   let boomPoint = 0;
-  let ticker = new PIXI.Ticker();
+  let cashedOut = false;
 
-  const resetGame = () => {
-    multiplier = 1.0;
-    cashedOut = false;
-    running = false;
-    boomPoint = +(Math.random() * 3 + 1.5).toFixed(2);
-    label.text = `${multiplier.toFixed(2)}x`;
-    label.style.fill = 0xffffff;
-    button.text = "Start";
-    button.style.fill = 0x00ff00;
+  const ticker = app.ticker;
+  ticker.autoStart = false;
+
+  // ===== STATE MACHINE =====
+  const startCountdown = () => {
+    gameState = "COUNTDOWN";
+    let counter = 3;
+    countdownText.text = `${counter}`;
+    const countdown = setInterval(() => {
+      counter--;
+      if (counter <= 0) {
+        clearInterval(countdown);
+        countdownText.text = "";
+        startGame();
+      } else {
+        countdownText.text = `${counter}`;
+      }
+    }, 1000);
   };
 
-  const stopGame = (cashed: boolean) => {
+  const startGame = () => {
+    gameState = "RUNNING";
+    multiplier = 1.0;
+    boomPoint = +(Math.random() * 3 + 1.5).toFixed(2);
+    cashedOut = false;
+    label.text = "1.00x";
+    label.style.fill = 0xffffff;
+    button.text = "Cash Out";
+    button.style.fill = 0xffcc00;
+    ticker.start();
+  };
+
+  const endGame = (cashed: boolean) => {
+    gameState = cashed ? "CASHED_OUT" : "BOOMED";
     ticker.stop();
-    running = false;
 
     if (cashed) {
       label.text = `✅ ${multiplier.toFixed(2)}x`;
       label.style.fill = 0x00ffff;
-      button.text = "Restart";
-      button.style.fill = 0xffff00;
     } else {
       label.text = "💥 BOOM!";
       label.style.fill = 0xff0000;
-      button.text = "Retry";
-      button.style.fill = 0xff0000;
+      flashBackground();
     }
 
-    // Reset after 2.5 seconds
+    button.text = "Restart";
+    button.style.fill = 0x00ff00;
+
     setTimeout(() => {
-      resetGame();
+      gameState = "IDLE";
+      label.text = "1.00x";
+      label.style.fill = 0xffffff;
+      button.text = "Start";
     }, 2500);
   };
 
-  ticker.add(() => {
-    multiplier += 0.01;
+  // ===== FLASH BG EFFECT =====
+  function flashBackground() {
+    const flash = new PIXI.Graphics();
+    flash.beginFill(0xff0000, 0.4);
+    flash.drawRect(0, 0, app.screen.width, app.screen.height);
+    flash.endFill();
+    container.addChild(flash);
+
+    setTimeout(() => {
+      container.removeChild(flash);
+    }, 200);
+  }
+
+  // ===== MULTIPLIER TICK =====
+  ticker.add((delta) => {
+    multiplier += rate * delta;
     label.text = `${multiplier.toFixed(2)}x`;
 
+    // Animate label
+    label.scale.set(1 + Math.sin(performance.now() / 200) * 0.05);
+
     if (multiplier >= boomPoint) {
-      stopGame(false);
+      endGame(false);
     }
   });
 
+  // ====== BUTTON INTERACTION ======
   button.on("pointerdown", () => {
-    if (!running && !cashedOut) {
-      // Start game
-      resetGame();
-      running = true;
-      boomPoint = +(Math.random() * 3 + 1.5).toFixed(2);
-      button.text = "Cash Out";
-      button.style.fill = 0xffcc00;
-      ticker.start();
-    } else if (running && !cashedOut) {
-      // Cash out
+    if (gameState === "IDLE") {
+      startCountdown();
+    } else if (gameState === "RUNNING" && !cashedOut) {
       cashedOut = true;
-      stopGame(true);
+      endGame(true);
     }
   });
-
-  resetGame(); // Start first state
 }
